@@ -1,12 +1,8 @@
 {
-  "updated_at": "2026-10-26T13:04:26.386755+00:00",
-  "count": 10350,
-  "sources": [
-    {
-      "source": "https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/reality.txt",
-      "parsed": 10350,
-      "ok": true
-    }
-  ],
-  "note": "Configuration syntax checked only; live connectivity not tested."
+  "name": "Quick VPN",
+  "updated_at": "2026-10-26T13:24:13.976224+00:00",
+  "candidates_found": 10349,
+  "servers_published": 5,
+  "validation": "format_only_not_live_connectivity",
+  "source_errors": []
 }
