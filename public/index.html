@@ -1,0 +1,166 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0e1c">
+  <title>Happ VPN — бесплатная подписка</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #202c60, #0a0e1c 60%);
+      font: 16px system-ui, sans-serif;
+      color: #fff;
+      min-height: 100vh;
+    }
+
+    main {
+      max-width: 680px;
+      margin: auto;
+      padding: 45px 18px;
+    }
+
+    header { text-align: center; }
+
+    h1 {
+      font-size: clamp(36px, 10vw, 48px);
+      margin: 10px;
+    }
+
+    p, small {
+      color: #aebcda;
+      line-height: 1.6;
+    }
+
+    .card {
+      background: #151d34;
+      border: 1px solid #324060;
+      border-radius: 20px;
+      padding: 24px;
+      margin-top: 24px;
+    }
+
+    .num {
+      font-size: 42px;
+      font-weight: 800;
+      color: #96aaff;
+    }
+
+    .url {
+      padding: 14px;
+      background: #0a1124;
+      overflow-wrap: anywhere;
+      border-radius: 10px;
+      margin: 16px 0;
+    }
+
+    button, a.button {
+      display: block;
+      width: 100%;
+      padding: 15px;
+      border: 0;
+      border-radius: 12px;
+      background: #647df5;
+      color: white;
+      text-align: center;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    a.button {
+      background: #303d60;
+      margin-top: 10px;
+    }
+
+    li { margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div style="font-size:50px">🛡️</div>
+      <h1>Happ VPN</h1>
+      <p>Бесплатная HTTPS-подписка VLESS + Reality</p>
+    </header>
+
+    <section class="card">
+      <small>Конфигураций в подписке</small>
+      <div id="count" class="num">—</div>
+      <small id="updated">Загрузка статуса...</small>
+
+      <h2>Твоя подписка</h2>
+      <div class="url" id="url">Загрузка...</div>
+
+      <button id="copy">Скопировать HTTPS-ссылку</button>
+      <a class="button" id="open" href="./sub.txt">
+        Открыть подписку
+      </a>
+
+      <p>
+        <small>
+          Серверы получены из публичных источников.
+          Их доступность не гарантируется.
+        </small>
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Как подключить Happ</h2>
+      <ol>
+        <li>Скопируй HTTPS-ссылку подписки.</li>
+        <li>Открой приложение Happ.</li>
+        <li>Добавь подписку по URL.</li>
+        <li>Обнови список и выбери сервер.</li>
+      </ol>
+      <small>
+        Не передавай конфиденциальные данные через
+        неизвестные публичные серверы.
+      </small>
+    </section>
+  </main>
+
+  <script>
+    const subscriptionUrl =
+      new URL('./sub.txt', location.href).href;
+
+    document.querySelector('#url').textContent =
+      subscriptionUrl;
+
+    document.querySelector('#open').href =
+      subscriptionUrl;
+
+    document.querySelector('#copy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(subscriptionUrl);
+        document.querySelector('#copy').textContent =
+          'Скопировано ✓';
+      } catch {
+        prompt('Скопируй ссылку:', subscriptionUrl);
+      }
+    };
+
+    fetch('./status.json', { cache: 'no-store' })
+      .then(response => {
+        if (!response.ok) throw new Error('Status unavailable');
+        return response.json();
+      })
+      .then(data => {
+        document.querySelector('#count').textContent =
+          data.count ?? 0;
+
+        document.querySelector('#updated').textContent =
+          'Обновлено: ' +
+          new Date(data.updated_at).toLocaleString('ru-RU');
+      })
+      .catch(() => {
+        document.querySelector('#updated').textContent =
+          'Статус пока недоступен';
+      });
+  </script>
+</body>
+</html>
