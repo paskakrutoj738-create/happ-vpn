@@ -13,8 +13,9 @@ SUB_FILE = os.path.join(OUTPUT_DIR, "sub.txt")
 STATUS_FILE = os.path.join(OUTPUT_DIR, "status.json")
 
 SUBSCRIPTION_NAME = "Quick VPN"
+MAX_CANDIDATES_TO_TEST = 100
 MAX_SERVERS = 10
-TCP_TIMEOUT = 3.0
+TCP_TIMEOUT = 2.0
 
 SOURCES = [
     "https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/reality.txt"
@@ -34,7 +35,7 @@ def fetch(url):
         url,
         headers={"User-Agent": "Quick-VPN-Collector/1.0"}
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=20) as response:
         return response.read(8_000_000).decode("utf-8", "ignore")
 
 
@@ -46,7 +47,6 @@ def extract_uris(text):
             decoded = base64.b64decode(
                 text + "=" * (-len(text) % 4)
             ).decode("utf-8", "ignore")
-
             if "vless://" in decoded:
                 text = decoded
         except Exception:
@@ -73,16 +73,15 @@ def parse_reality(uri):
         if not parsed.username:
             return None
 
-        security = query.get("security", [""])[0].lower()
+        if query.get("security", [""])[0].lower() != "reality":
+            return None
+
         public_key = query.get(
             "pbk", query.get("publickey", [""])
         )[0]
         server_name = query.get(
             "sni", query.get("servername", [""])
         )[0]
-
-        if security != "reality":
-            return None
 
         if not public_key or not server_name:
             return None
@@ -95,43 +94,31 @@ def parse_reality(uri):
 
 def measure_tcp(uri):
     endpoint = parse_reality(uri)
-
     if not endpoint:
         return None
 
     host, port = endpoint
-    samples = []
+    start = time.perf_counter()
 
-    # Повторная проверка уменьшает влияние случайного скачка.
-    for _ in range(2):
-        start = time.perf_counter()
-
-        try:
-            with socket.create_connection(
-                (host, port), timeout=TCP_TIMEOUT
-            ):
-                samples.append(
-                    (time.perf_counter() - start) * 1000
-                )
-        except OSError:
-            return None
-
-    return sum(samples) / len(samples)
+    try:
+        with socket.create_connection(
+            (host, port), timeout=TCP_TIMEOUT
+        ):
+            return (time.perf_counter() - start) * 1000
+    except OSError:
+        return None
 
 
 def rename_server(uri, index, latency):
-    """Даёт серверу понятное имя в списке Happ."""
     parsed = urllib.parse.urlsplit(uri)
-
     label = f"Quick VPN {index:02d} ({latency:.0f} ms)"
-    new_fragment = urllib.parse.quote(label, safe=" -().")
 
     return urllib.parse.urlunsplit((
         parsed.scheme,
         parsed.netloc,
         parsed.path,
         parsed.query,
-        new_fragment
+        urllib.parse.quote(label, safe=" -().")
     ))
 
 
@@ -147,7 +134,6 @@ def main():
             for uri in extract_uris(fetch(source)):
                 if uri in seen:
                     continue
-
                 seen.add(uri)
 
                 if parse_reality(uri):
@@ -159,23 +145,25 @@ def main():
                 "error": str(error)[:200]
             })
 
-    print(f"Подходящих конфигураций: {len(candidates)}")
-
+    # Ограничиваем число проверок, чтобы workflow не зависал надолго.
+    candidates_to_test = candidates[:MAX_CANDIDATES_TO_TEST]
     tested = []
 
-    for number, uri in enumerate(candidates, start=1):
+    print(f"Всего найдено: {len(candidates)}")
+    print(f"Будет проверено максимум: {len(candidates_to_test)}")
+
+    for index, uri in enumerate(candidates_to_test, start=1):
         latency = measure_tcp(uri)
 
         if latency is not None:
             tested.append((latency, uri))
 
-        if number % 100 == 0:
-            print(f"Проверено конфигураций: {number}")
+        if index % 10 == 0:
+            print(f"Проверено: {index}/{len(candidates_to_test)}")
 
     tested.sort(key=lambda item: item[0])
     selected = tested[:MAX_SERVERS]
 
-    # Параметры управления Happ идут перед VLESS-ссылками.
     lines = [
         "#subscription-autoconnect: 1",
         "#subscription-autoconnect-type: lowestdelay",
@@ -194,11 +182,11 @@ def main():
         "name": SUBSCRIPTION_NAME,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "candidates_found": len(candidates),
+        "candidates_checked": len(candidates_to_test),
         "servers_tested": len(tested),
         "servers_published": len(selected),
         "tcp_latency_ms": [
-            round(latency, 1)
-            for latency, _ in selected
+            round(latency, 1) for latency, _ in selected
         ],
         "validation": "tcp_check_only_not_vpn_handshake",
         "source_errors": errors
@@ -210,10 +198,7 @@ def main():
     print(f"Опубликовано серверов: {len(selected)}")
 
     if selected:
-        print(
-            "Минимальная TCP-задержка: "
-            f"{selected[0][0]:.1f} ms"
-        )
+        print(f"Лучшая TCP-задержка: {selected[0][0]:.1f} ms")
     else:
         print("Нет серверов с доступным TCP-портом")
 
