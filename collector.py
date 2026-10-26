@@ -1,169 +1,114 @@
 
-import base64
-import json
 import os
-import re
+import json
+import base64
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, parse_qs
+
+OUTPUT_DIR = "public"
+SUB_FILE = os.path.join(OUTPUT_DIR, "sub.txt")
+STATUS_FILE = os.path.join(OUTPUT_DIR, "status.json")
 
 SOURCES = [
-    "https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/reality.txt",
+    "https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/reality.txt"
 ]
 
-# Дополнительные HTTPS-источники через переменную окружения.
-EXTRA = os.environ.get("EXTRA_SOURCES", "")
-SOURCES += [
-    item.strip()
-    for item in EXTRA.split(",")
-    if item.strip().startswith("https://")
-]
-
-MAX_BYTES = 8 * 1024 * 1024
-
+extra = os.environ.get("EXTRA_SOURCES", "").strip()
+if extra:
+    SOURCES.extend(x.strip() for x in extra.splitlines() if x.strip())
 
 def fetch(url):
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "HappSubscriptionCollector/1.0"},
+        headers={"User-Agent": "QuickVPN-Collector/1.0"}
     )
-
     with urllib.request.urlopen(request, timeout=25) as response:
-        data = response.read(MAX_BYTES + 1)
+        data = response.read(4_000_000).decode("utf-8", "ignore")
+    return data
 
-    if len(data) > MAX_BYTES:
-        raise ValueError("Source too large")
+def extract_lines(text):
+    text = text.strip()
+    if not text:
+        return []
 
-    return data.decode("utf-8-sig", errors="replace")
-
-
-def extract(text):
-    # Источники могут содержать обычный текст или Base64.
-    candidates = [text]
-    compact = "".join(text.split())
-
-    if compact and re.fullmatch(r"[A-Za-z0-9+/=_-]+", compact):
+    if "vless://" not in text and not text.startswith("vmess://"):
         try:
             decoded = base64.b64decode(
-                compact + "=" * (-len(compact) % 4),
-                validate=False,
-            ).decode("utf-8")
-            candidates.append(decoded)
-        except (ValueError, UnicodeError):
+                text + "=" * (-len(text) % 4)
+            ).decode("utf-8", "ignore")
+            if "vless://" in decoded:
+                text = decoded
+        except Exception:
             pass
 
-    for item in candidates:
-        for token in re.findall(
-            r"vless://[^\s<>\"']+",
-            item,
-            re.IGNORECASE,
-        ):
-            yield token.rstrip("),.;")
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("vless://")
+    ]
 
-
-def valid(uri):
+def valid_reality(uri):
     try:
-        parsed = urlsplit(uri)
-
-        if (
-            parsed.scheme.lower() != "vless"
-            or not parsed.hostname
-            or not parsed.port
-            or not parsed.username
-        ):
+        parsed = urllib.parse.urlsplit(uri)
+        if parsed.scheme != "vless" or not parsed.hostname:
+            return False
+        if not parsed.port or not parsed.username:
             return False
 
-        query = {
-            key.lower(): values
-            for key, values in parse_qs(parsed.query).items()
-        }
-
+        query = urllib.parse.parse_qs(parsed.query)
         security = query.get("security", [""])[0].lower()
+        public_key = query.get("pbk", query.get("publickey", [""]))[0]
+        server_name = query.get("sni", query.get("servername", [""]))[0]
 
-        if security != "reality":
-            return False
-
-        if not (
-            query.get("pbk")
-            or query.get("publickey")
-        ):
-            return False
-
-        if not (
-            query.get("sni")
-            or query.get("servername")
-        ):
-            return False
-
-        return True
-
-    except (ValueError, TypeError):
+        return (
+            security == "reality"
+            and bool(public_key)
+            and bool(server_name)
+        )
+    except Exception:
         return False
 
-
 def main():
-    found = {}
-    source_status = []
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    found = []
+    source_errors = []
 
     for source in SOURCES:
         try:
-            entries = [
-                uri for uri in extract(fetch(source))
-                if valid(uri)
-            ]
-
-            for uri in entries:
-                # Убираем дубликаты, даже если различаются названия.
-                found.setdefault(uri.split("#", 1)[0], uri)
-
-            source_status.append({
-                "source": source,
-                "parsed": len(entries),
-                "ok": True,
-            })
-
+            content = fetch(source)
+            for uri in extract_lines(content):
+                if valid_reality(uri) and uri not in found:
+                    found.append(uri)
         except Exception as error:
-            print("Source failed:", source, str(error)[:150])
-
-            source_status.append({
+            source_errors.append({
                 "source": source,
-                "ok": False,
-                "error": str(error)[:150],
+                "error": str(error)[:200]
             })
 
-    os.makedirs("public", exist_ok=True)
-    subscription_path = "public/sub.txt"
+    selected = found[:5]
 
-    if found:
-        with open(subscription_path, "w", encoding="utf-8") as file:
-            file.write("\n".join(found.values()) + "\n")
-
-    elif not os.path.isfile(subscription_path):
-        # Не выдаём пустой список за рабочую подписку.
-        with open(subscription_path, "w", encoding="utf-8") as file:
-            file.write("")
-
-    with open(subscription_path, encoding="utf-8") as file:
-        count = sum(
-            1 for line in file
-            if line.startswith("vless://")
-        )
+    with open(SUB_FILE, "w", encoding="utf-8") as file:
+        file.write("\n".join(selected))
+        if selected:
+            file.write("\n")
 
     status = {
+        "name": "Quick VPN",
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "count": count,
-        "sources": source_status,
-        "note": (
-            "Configuration syntax checked only; "
-            "live connectivity not tested."
-        ),
+        "candidates_found": len(found),
+        "servers_published": len(selected),
+        "validation": "format_only_not_live_connectivity",
+        "source_errors": source_errors
     }
 
-    with open("public/status.json", "w", encoding="utf-8") as file:
+    with open(STATUS_FILE, "w", encoding="utf-8") as file:
         json.dump(status, file, ensure_ascii=False, indent=2)
 
-    print("Published", count, "configurations")
-
+    print(f"Quick VPN: найдено {len(found)} кандидатов")
+    print(f"Опубликовано: {len(selected)}")
+    if source_errors:
+        print(f"Ошибок источников: {len(source_errors)}")
 
 if __name__ == "__main__":
     main()
