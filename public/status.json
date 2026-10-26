@@ -1,8 +1,22 @@
 {
   "name": "Quick VPN",
-  "updated_at": "2026-10-26T13:24:13.976224+00:00",
+  "updated_at": "2026-10-26T14:41:37.756269+00:00",
   "candidates_found": 10349,
-  "servers_published": 5,
-  "validation": "format_only_not_live_connectivity",
+  "candidates_checked": 100,
+  "servers_tested": 93,
+  "servers_published": 10,
+  "tcp_latency_ms": [
+    6.0,
+    7.6,
+    11.1,
+    11.2,
+    11.5,
+    12.5,
+    35.6,
+    65.4,
+    68.3,
+    76.8
+  ],
+  "validation": "tcp_check_only_not_vpn_handshake",
   "source_errors": []
 }
